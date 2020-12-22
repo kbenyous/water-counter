@@ -1,0 +1,134 @@
+---
+
+- hosts: water_counter
+  
+  tasks:
+    - block:
+    
+      - name: Création du groupe
+        group: 
+          name: watercounter
+
+      - name: Création de l'utilisateur
+        user: 
+          name: watercounter
+          group: watercounter
+          password_lock: yes
+
+      - name: Création des répertoires dans /opt/water-counter
+        file: 
+          name: "{{ item }}"
+          state: directory
+          owner: watercounter
+          group: watercounter
+          mode: 0755
+        loop:
+          - /opt/water-counter
+          - /opt/water-counter/virtualenv
+          - /opt/water-counter/bin
+          - /opt/water-counter/service
+          - /opt/water-counter/conf
+
+      - name: Création des répertoires dans /etc
+        file:
+          name: /etc/water-counter
+          state: directory
+          owner: root
+          group: watercounter
+          mode: 0755
+
+      - name: Installation de Python3
+        apt:
+          name: 
+            # Intrepréteur Python3 et virtualenv pour le script water-counter.py 
+            - python3
+            - python3-pip
+            - python3-venv
+            - python3-setuptools
+            # Problème avec Ansible. su vers un utilisateur non-root
+            # https://stackoverflow.com/questions/36646880/ansible-2-1-0-using-become-become-user-fails-to-set-permissions-on-temp-file/36681626
+            - acl
+            # Problème avec Ansible. Pour utiliser pip, un setuptools doit être installé dans l'interpréteur Python exécutant Ansible sur la machine remote           
+            # https://github.com/ansible/ansible/issues/61929
+            - python-setuptools
+
+      become: yes      
+
+    - name: Création d'un virtualenv
+      become_user: watercounter
+      become: yes
+      shell:  |
+        python3 -m venv /opt/water-counter/virtualenv
+      args:
+        creates: /opt/water-counter/virtualenv/bin/activate
+    
+    - name: Installation des paquets Python
+      become_user: watercounter
+      become: yes
+      pip:
+        name:
+          - configparser
+          - paho_mqtt
+          - sdnotify
+        executable: /opt/water-counter/virtualenv/bin/pip3
+    
+    - name: Copie des fichiers 
+      become_user: root
+      become: yes
+      copy:
+        src: "src/{{ item.src}}"
+        dest: "{{ item.dest }}"
+        mode: "{{ item.mode }}"
+        owner: watercounter
+        group: watercounter
+      with_items:
+        - src: opt/water-counter/bin/water-counter.py
+          dest: /opt/water-counter/bin/water-counter.py
+          mode: "0755"
+        - src: opt/water-counter/service/water-counter.service
+          dest: /opt/water-counter/service/water-counter.service
+          mode: "0644"
+        - src: opt/water-counter/conf/water-counter.example.conf
+          dest: /opt/water-counter/conf/water-counter.example.conf
+          mode: "0644"
+      notify:
+        - "Rechargement de la description des services SystemD"
+        - "Activation et démarrage du service"
+
+    - name: Dépot de la configuration
+      become: yes
+      copy:
+        src: /opt/water-counter/conf/water-counter.example.conf
+        dest: /etc/water-counter/water-counter.conf
+        force: no
+        remote_src: yes
+        owner: root
+        group: root
+        mode: 0644
+      notify:
+        - "Rechargement de la description des services SystemD"
+        - "Activation et démarrage du service"
+
+    - name: Ajout du service dans la configuration SystemD
+      become: yes
+      file:
+        state: link
+        src: /opt/water-counter/service/water-counter.service
+        dest: /etc/systemd/system/water-counter.service
+      notify:
+        - "Rechargement de la description des services SystemD"
+        - "Activation et démarrage du service"
+
+  handlers:
+    - name: Rechargement de la description des services SystemD
+      systemd:
+        daemon_reload: yes
+      become: yes
+        
+    - name: Activation et démarrage du service
+      systemd:
+        name: water-counter
+        state: restarted
+        enabled: yes
+      become: yes
+      

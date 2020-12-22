@@ -1,0 +1,17 @@
+[Unit]
+Description=Water Counter, service de totalisation de consommation d'eau, à partir de la consommation instantannée
+
+[Service]
+# Note: setting PYTHONUNBUFFERED is necessary to see the output of this service in the journal
+# See https://docs.python.org/2/using/cmdline.html#envvar-PYTHONUNBUFFERED
+Environment=PYTHONUNBUFFERED=true
+ExecStart=/opt/water-counter/virtualenv/bin/python3 /opt/water-counter/bin/water-counter.py
+Type=notify
+WatchdogSec=60
+Restart=on-failure
+RestartSec=60
+User=watercounter
+Group=watercounter
+
+[Install]
+WantedBy=multi-user.target
